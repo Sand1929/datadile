@@ -7,15 +7,15 @@ name = "datadile"
 version = "0.1.0"
 description = "YAML-defined data tests for SQL query results"
 readme = "README.md"
-requires-python = ">=3.8"
-license = { text = "MIT" }
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
 authors = [
-    { name = "Your Name", email = "you@example.com" },
+    { name = "Sandy Suh", email = "sandy@parsagon.io" },
 ]
 keywords = []
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -33,7 +33,8 @@ dependencies = [
 datadile = "datadile:main"
 
 [project.urls]
-Homepage = "https://github.com/yourname/datadile"
+Homepage = "https://github.com/Sand1929/datadile"
+Repository = "https://github.com/Sand1929/datadile"
 
 [tool.hatch.build.targets.wheel]
 packages = ["datadile"]
@@ -44,6 +45,7 @@ packages = ["datadile"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/datadile",
+    "/LICENSE",
     "/README.md",
     "/pyproject.toml",
     "/datadile.yaml.example",
