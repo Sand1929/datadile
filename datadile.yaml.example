@@ -1,0 +1,19 @@
+# Optional. Only required for premium server-backed features.
+api_key_env: DATADILE_API_KEY
+
+# Optional. Used by tests that do not set data_source.
+default_data_source: main
+
+data_sources:
+  main:
+    type: postgresql
+    host: localhost
+    port: 5432
+    user: myuser
+    database: mydb
+    password_env: DATADILE_DATA_SOURCE_PASSWORD
+
+# Premium server-backed data source example:
+# data_sources:
+#   main:
+#     id: ds_abc123
