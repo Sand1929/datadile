@@ -1,26 +1,39 @@
 import argparse
 import ast
+import json
 import operator
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from importlib import resources
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 import yaml
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import create_engine, text
 
-from .config import get_data_source_config
+from .config import get_api_host, get_api_key, get_data_source_config
 
 console = Console()
 
 DATA_TEST_FILE_PATTERN = "*.dile.yaml"
 DEFAULT_SKILL_INSTALL_PATH = Path(".opencode") / "skills" / "datadile" / "SKILL.md"
+DATA_TEST_RUNS_ENDPOINT = "/api/datatests/runs/"
 SEVERITIES = {"LOW", "MEDIUM", "HIGH"}
+SERVER_EXPECT_OPERATORS = {
+    "=": "eq",
+    "!=": "neq",
+    "<": "lt",
+    "<=": "lte",
+    ">": "gt",
+    ">=": "gte",
+}
 EXPECT_OPERATORS = {
     ">=": operator.ge,
     "<=": operator.le,
@@ -39,6 +52,8 @@ class DataTest:
     expect: str
     severity: str = "MEDIUM"
     data_source: str | None = None
+    identity: str | None = None
+    filepath: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,14 +84,14 @@ def load_data_tests(path: str | Path) -> list[DataTest]:
     if not isinstance(raw_tests, list):
         raise ValueError("Data test file must contain a list of tests or a top-level 'tests' list.")
 
-    return [_parse_data_test(item, index) for index, item in enumerate(raw_tests, start=1)]
+    return [_parse_data_test(item, index, test_path) for index, item in enumerate(raw_tests, start=1)]
 
 
 def discover_data_test_files(root: str | Path = ".") -> list[Path]:
     return sorted(Path(root).rglob(DATA_TEST_FILE_PATTERN))
 
 
-def _parse_data_test(raw: Any, index: int) -> DataTest:
+def _parse_data_test(raw: Any, index: int, test_path: Path | None = None) -> DataTest:
     if not isinstance(raw, dict):
         raise ValueError(f"Test #{index} must be a mapping.")
 
@@ -95,6 +110,8 @@ def _parse_data_test(raw: Any, index: int) -> DataTest:
         expect=str(raw["expect"]),
         severity=severity,
         data_source=str(raw["data_source"]) if raw.get("data_source") else None,
+        identity=str(raw["identity"]) if raw.get("identity") else None,
+        filepath=str(test_path) if test_path else None,
     )
 
 
@@ -196,6 +213,107 @@ def _normalize_value(value: Any) -> Any:
     return value
 
 
+def _json_safe(value: Any) -> Any:
+    """Return a JSON-serializable copy of a value, stringifying unsupported types."""
+    return json.loads(json.dumps(value, default=str))
+
+
+def _api_url(host: str, path: str) -> str:
+    """Build an absolute API URL from a configured host and endpoint path."""
+    base_url = host if host.startswith(("http://", "https://")) else f"https://{host}"
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _git_output(args: list[str], cwd: Path | None = None) -> str | None:
+    """Run a Git command and return stripped stdout, or None if Git cannot answer."""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            check=True,
+            cwd=cwd,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def _repo_name_from_origin(origin_url: str) -> str:
+    """Extract the repository name from a Git remote URL."""
+    repo_name = origin_url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+    if repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+    return repo_name
+
+
+def _cloud_filepath(path: str | None) -> str:
+    """Return the Datadile Cloud filepath for a local data test file."""
+    if not path:
+        return ""
+
+    test_path = Path(path).resolve()
+    git_cwd = test_path.parent if test_path.exists() else None
+    repo_root = _git_output(["rev-parse", "--show-toplevel"], cwd=git_cwd)
+    origin_url = _git_output(["config", "--get", "remote.origin.url"], cwd=git_cwd)
+    if not repo_root:
+        return str(Path(path))
+
+    try:
+        relative_path = test_path.relative_to(Path(repo_root).resolve())
+    except ValueError:
+        relative_path = Path(path)
+
+    if not origin_url:
+        return relative_path.as_posix()
+
+    return f"{_repo_name_from_origin(origin_url)}/{relative_path.as_posix()}"
+
+
+def _cloud_run_payload(result: DataTestResult, finished_at: datetime) -> dict[str, Any]:
+    """Convert a local data test result into the cloud run-create payload."""
+    expected_operator, expected_value = _parse_expectation(result.test.expect)
+    payload = {
+        "filepath": _cloud_filepath(result.test.filepath),
+        "name": result.test.name,
+        "description": result.test.description,
+        "query": result.test.query,
+        "expected_operator": SERVER_EXPECT_OPERATORS[expected_operator],
+        "expected_value": _json_safe(expected_value),
+        "severity": result.test.severity,
+        "status": "PASSED" if result.passed else "ERROR" if result.error else "FAILED",
+        "actual_value": _json_safe(result.actual),
+        "error_message": result.error or "",
+        "finished_at": finished_at.isoformat(),
+    }
+    if result.test.identity:
+        payload["identity"] = result.test.identity
+    return payload
+
+
+def record_data_test_runs(results: list[DataTestResult], finished_at: datetime) -> None:
+    """Record local data test results in Datadile Cloud when an API key is configured."""
+    try:
+        api_key = get_api_key()
+    except Exception as exc:
+        console.print(f"[yellow]Could not record data test runs in Datadile Cloud: {exc}[/yellow]")
+        return
+
+    if not api_key:
+        return
+
+    url = _api_url(get_api_host(), DATA_TEST_RUNS_ENDPOINT)
+    headers = {"Authorization": f"Token {api_key}"}
+
+    with httpx.Client(timeout=10) as client:
+        for result in results:
+            try:
+                response = client.post(url, json=_cloud_run_payload(result, finished_at), headers=headers)
+                response.raise_for_status()
+            except Exception as exc:
+                console.print(f"[yellow]Could not record data test run '{result.test.name}' in Datadile Cloud: {exc}[/yellow]")
+
+
 def print_results(results: list[DataTestResult]) -> None:
     table = Table(title="Datadile Data Tests")
     table.add_column("Status")
@@ -233,7 +351,9 @@ def test_command(args: argparse.Namespace) -> None:
         tests.extend(load_data_tests(test_path))
 
     results = run_data_tests(tests, get_data_source_config)
+    finished_at = datetime.now(timezone.utc)
     print_results(results)
+    record_data_test_runs(results, finished_at)
 
     if any(not result.passed for result in results):
         sys.exit(1)

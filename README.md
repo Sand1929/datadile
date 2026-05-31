@@ -8,6 +8,22 @@ Datadile runs YAML-defined data tests against query results.
 pip install datadile
 ```
 
+## Coding Agent Skill
+
+Datadile includes a bundled coding-agent skill with Datadile-specific guidance. Install it into the current project with:
+
+```bash
+datadile install-skill
+```
+
+By default, this writes the skill to `.opencode/skills/datadile/SKILL.md`.
+
+To install it somewhere else, pass a destination path:
+
+```bash
+datadile install-skill path/to/SKILL.md
+```
+
 ## Configuration
 
 datadile looks for a YAML config file in two locations (local takes precedence):
@@ -74,9 +90,11 @@ datadile test <path/to/file.dile.yaml>
 
 With no path, Datadile recursively discovers only files matching `*.dile.yaml` from the current directory. Other YAML files, such as `docker-compose.yaml`, GitHub Actions workflows, Helm values, and OpenAPI specs, are ignored.
 
+If an API key is configured, Datadile records completed local test runs in Datadile Cloud. For Git repositories, cloud run file paths are recorded as `<repo-name>/<path-from-repo-root>` using `remote.origin.url`; outside a Git repository, Datadile records the local test file path without the repo prefix.
+
 ## Data Tests
 
-Tests are defined in YAML. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured.
+Tests are defined in YAML. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured. `identity` is optional and gives Datadile Cloud a stable identifier for the test, even if the file path changes.
 
 For example, a test can set `data_source: app_db` after `app_db` is added under `data_sources`.
 
@@ -92,6 +110,7 @@ app/billing/invoices.dile.yaml
 ```yaml
 tests:
   - name: no_failed_orders
+    identity: orders.no_failed_orders
     description: There should be no failed orders today.
     severity: HIGH
     data_source: app_db
