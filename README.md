@@ -2,6 +2,10 @@
 
 Datadile runs YAML-defined data tests against query results.
 
+Use Datadile to make the data assumptions behind your application, migrations, and backfills explicit and testable. Define lightweight checks in human-readable YAML, run them from the CLI against your database, and catch unsafe data states before they break code, block releases, or corrupt downstream workflows.
+
+Datadile is AI-first: coding agents can add data tests as they edit code and use Datadile Cloud context to understand which assumptions are passing or failing. Datadile Cloud adds dashboards, alerts, anomaly detection, and adversarial algorithms that help catch data-related bugs agents might otherwise miss.
+
 ## Quick Start
 
 Install Datadile:
