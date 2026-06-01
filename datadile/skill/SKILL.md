@@ -10,9 +10,11 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 ## Default Workflow
 
 - Before editing or writing a data migration, backfill, cleanup, one-off data script, or any code path that mutates existing records, first identify the assumptions the change makes about current data.
+- Before writing new Datadile tests, identify the data source and the tables/columns involved, then run `datadile context --data-source <name> --table <table>` or `datadile context --data-source <name> --column <table.column>` when available. Use the returned local and cloud tests to understand existing assumptions, naming conventions, constraints, and coverage gaps.
 - Add or update pre-flight `*.dile.yaml` tests for those assumptions by default. Do this proactively; do not wait for the user to ask for pre-flight tests.
 - If no useful pre-flight test is possible, state why and note the residual risk before making the data-changing edit.
 - After the change, add or update post-change checks when the outcome can be validated with SQL.
+- When adding tests meant to run before and after a migration or backfill, put the pre-flight and post-change tests in separate `*.dile.yaml` files so the agent can run the pre-flight tests, then the migration or backfill, then the post-change tests.
 - Run the relevant `datadile test` command when a data source is available; otherwise, tell the user exactly which command should be run and why it was not run locally.
 
 ## Use Cases
@@ -32,6 +34,7 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 - Each test needs `name`, `description`, `query`, and `expect`.
 - `severity` is optional and must be `LOW`, `MEDIUM`, or `HIGH`; it defaults to `MEDIUM`.
 - `data_source` is optional; without it, Datadile uses `default_data_source` from `datadile.yaml`.
+- `datadile context` filters relevance by same data source and overlapping referenced tables/columns, not by repository or file proximity.
 - Keep passwords and API keys in environment variables. Use `password_env` and `api_key_env`; do not put secret values directly in YAML.
 - PostgreSQL is the local execution target today. Keep test YAML generic enough that other query engines can be added later.
 

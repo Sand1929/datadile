@@ -516,6 +516,13 @@ def test_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def context_command(args: argparse.Namespace) -> None:
+    """Delegate context handling to the context module."""
+    from .context import context_command as run_context_command
+
+    run_context_command(args)
+
+
 def install_skill_command(args: argparse.Namespace) -> None:
     """Install the bundled Datadile coding-agent skill file."""
     default_destination = GLOBAL_AGENT_SKILL_INSTALL_PATHS[args.agent] if args.global_install else AGENT_SKILL_INSTALL_PATHS[args.agent]
@@ -561,6 +568,29 @@ def main() -> None:
     test_parser = subparsers.add_parser("test", help="Run YAML data tests")
     test_parser.add_argument("filepath", nargs="?", help="Path to a YAML data test file")
     test_parser.set_defaults(func=test_command)
+
+    context_parser = subparsers.add_parser("context", help="Show test context for tables and columns")
+    context_parser.add_argument("--data-source", help="Data source name to search within")
+    context_parser.add_argument(
+        "--table",
+        action="append",
+        default=[],
+        help="Table of interest. Repeat for multiple tables.",
+    )
+    context_parser.add_argument(
+        "--column",
+        action="append",
+        default=[],
+        help="Column of interest, preferably table-qualified. Repeat for multiple columns.",
+    )
+    context_parser.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="markdown",
+        help="Output format for coding agents or tools",
+    )
+    context_parser.add_argument("--no-cloud", action="store_true", help="Use only local *.dile.yaml files")
+    context_parser.set_defaults(func=context_command)
 
     init_parser = subparsers.add_parser("init", help="Write a starter datadile.yaml config file")
     init_parser.add_argument(
