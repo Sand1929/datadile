@@ -20,12 +20,12 @@ from rich.prompt import Confirm
 from rich.table import Table
 from sqlalchemy import create_engine, text
 
-from .config import get_api_host, get_api_key, get_data_source_config
+from .config import CONFIG_FILENAME, USER_CONFIG_PATH, get_api_host, get_api_key, get_data_source_config
 
 console = Console()
 
 DATA_TEST_FILE_PATTERN = "*.dile.yaml"
-DEFAULT_CONFIG_TEMPLATE_PATH = Path("datadile.yaml")
+DEFAULT_CONFIG_TEMPLATE_PATH = Path(CONFIG_FILENAME)
 DEFAULT_SKILL_AGENT = "opencode"
 DEFAULT_AGENTS_SKILL_INSTALL_PATH = Path(".agents") / "skills" / "datadile" / "SKILL.md"
 GLOBAL_AGENTS_SKILL_INSTALL_PATH = Path("~") / ".agents" / "skills" / "datadile" / "SKILL.md"
@@ -537,7 +537,12 @@ def install_skill_command(args: argparse.Namespace) -> None:
 
 def init_command(args: argparse.Namespace) -> None:
     """Write a starter Datadile config file."""
-    destination = Path(args.destination or DEFAULT_CONFIG_TEMPLATE_PATH).expanduser()
+    if getattr(args, "global_install", False) and args.destination:
+        console.print("Pass either a destination or --global/--user, not both.")
+        sys.exit(1)
+
+    default_destination = USER_CONFIG_PATH if getattr(args, "global_install", False) else DEFAULT_CONFIG_TEMPLATE_PATH
+    destination = Path(args.destination or default_destination).expanduser()
     destination = destination if destination.is_absolute() else Path.cwd() / destination
 
     if destination.exists() and not args.force:
@@ -563,6 +568,12 @@ def main() -> None:
         "destination",
         nargs="?",
         help="Where to write the config file (default: datadile.yaml)",
+    )
+    init_parser.add_argument(
+        "--global",
+        dest="global_install",
+        action="store_true",
+        help="Write to the user-level config at ~/.datadile/datadile.yaml",
     )
     init_parser.add_argument("--force", action="store_true", help="Overwrite the destination if it already exists")
     init_parser.set_defaults(func=init_command)

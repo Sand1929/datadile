@@ -19,6 +19,29 @@ def test_init_command_writes_default_config(monkeypatch, tmp_path):
     assert yaml.safe_load(destination.read_text()) == yaml.safe_load(core.CONFIG_TEMPLATE)
 
 
+def test_init_command_writes_user_level_config(monkeypatch, tmp_path):
+    """--global writes datadile.yaml to the user-level config location."""
+    destination = tmp_path / ".datadile" / "datadile.yaml"
+
+    monkeypatch.setattr(core, "USER_CONFIG_PATH", destination)
+
+    init_command(SimpleNamespace(destination=None, force=False, global_install=True))
+
+    assert destination.exists()
+    assert yaml.safe_load(destination.read_text()) == yaml.safe_load(core.CONFIG_TEMPLATE)
+
+
+def test_init_command_rejects_destination_with_user_level_install(tmp_path):
+    """A custom destination cannot be combined with --global."""
+    destination = tmp_path / "datadile.yaml"
+
+    with pytest.raises(SystemExit) as exc_info:
+        init_command(SimpleNamespace(destination=destination, force=False, global_install=True))
+
+    assert exc_info.value.code == 1
+    assert not destination.exists()
+
+
 def test_init_command_writes_custom_destination(tmp_path):
     """A destination argument controls where the config is written."""
     destination = tmp_path / "config" / "datadile.yaml"
