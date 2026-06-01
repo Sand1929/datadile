@@ -10,19 +10,63 @@ pip install datadile
 
 ## Coding Agent Skill
 
-Datadile includes a bundled coding-agent skill with Datadile-specific guidance. Install it into the current project with:
+Datadile includes a bundled coding-agent skill with Datadile-specific guidance. Install it into the current working directory with:
 
 ```bash
 datadile install-skill
 ```
 
-By default, this writes the skill to `.opencode/skills/datadile/SKILL.md`.
+By default, this writes the skill to `.agents/skills/datadile/SKILL.md` under the directory where you run the command. The command shows the full destination path and asks for confirmation before writing the file.
+
+To install for a different coding agent, pass `--agent`:
+
+```bash
+datadile install-skill --agent claude
+datadile install-skill --agent cursor
+datadile install-skill --agent github-copilot
+datadile install-skill --agent openai-codex
+datadile install-skill --agent vscode
+datadile install-skill --agent snowflake-cortex
+```
+
+Supported project-local agent defaults are:
+
+| Agent | Default destination |
+| --- | --- |
+| `opencode` | `.agents/skills/datadile/SKILL.md` |
+| `claude` / `claude-code` | `.claude/skills/datadile/SKILL.md` |
+| `cursor` | `.agents/skills/datadile/SKILL.md` |
+| `github-copilot` / `copilot` | `.agents/skills/datadile/SKILL.md` |
+| `openai-codex` / `codex` | `.agents/skills/datadile/SKILL.md` |
+| `vscode` / `vs-code` / `visual-studio-code` | `.agents/skills/datadile/SKILL.md` |
+| `snowflake-cortex` / `cortex` | `.cortex/skills/datadile/SKILL.md` |
+
+To install into the selected agent's user-level skills directory instead, pass `--global`:
+
+```bash
+datadile install-skill --global
+datadile install-skill --agent claude --global
+```
+
+Supported global destinations are:
+
+| Agent | Global destination |
+| --- | --- |
+| `opencode` | `~/.agents/skills/datadile/SKILL.md` |
+| `claude` / `claude-code` | `~/.claude/skills/datadile/SKILL.md` |
+| `cursor` | `~/.agents/skills/datadile/SKILL.md` |
+| `github-copilot` / `copilot` | `~/.agents/skills/datadile/SKILL.md` |
+| `openai-codex` / `codex` | `~/.agents/skills/datadile/SKILL.md` |
+| `vscode` / `vs-code` / `visual-studio-code` | `~/.agents/skills/datadile/SKILL.md` |
+| `snowflake-cortex` / `cortex` | `~/.snowflake/cortex/skills/datadile/SKILL.md` |
 
 To install it somewhere else, pass a destination path:
 
 ```bash
 datadile install-skill path/to/SKILL.md
 ```
+
+For non-interactive installs, pass `--yes` to skip the confirmation prompt.
 
 ## Configuration
 
@@ -31,10 +75,17 @@ datadile looks for a YAML config file in two locations (local takes precedence):
 1. `./datadile.yaml` (current directory)
 2. `~/.datadile/datadile.yaml` (user-level)
 
-Copy the example and fill in your values:
+Create a starter config and fill in your values:
 
 ```bash
-cp datadile.yaml.example datadile.yaml
+datadile init
+```
+
+To write it somewhere else, pass a destination path. Existing files are not overwritten unless you pass `--force`.
+
+```bash
+datadile init path/to/datadile.yaml
+datadile init --force
 ```
 
 ```yaml

@@ -1,14 +1,25 @@
 ---
 name: datadile
-description: Use when creating, editing, reviewing, or debugging Datadile data tests, datadile.yaml config, *.dile.yaml files, SQL expectations, or the datadile CLI/package code. Load this skill before changing data test YAML, connection configuration, test discovery, expectation parsing, result normalization, or CLI behavior.
+description: Use when data migrations, backfills, data-changing scripts, data invariants, assumptions in code about database contents, Datadile data tests, datadile.yaml config, *.dile.yaml files, SQL expectations, or Datadile CLI/package code are involved. Load this skill before pre-flight checks, validating implicit data assumptions, adding post-change verification, or changing Datadile behavior. For data-changing work, default to adding pre-flight Datadile checks unless the user explicitly declines.
 ---
 
 # Datadile
 
-Datadile runs YAML-defined data tests against query results. Use this skill when work involves Datadile test files, configuration, CLI behavior, or package internals.
+Datadile runs YAML-defined data tests against query results. Use this skill when work involves data migrations, backfills, data-changing scripts, data invariants, code assumptions about database contents, Datadile test files, configuration, CLI behavior, or package internals.
+
+## Default Workflow
+
+- Before editing or writing a data migration, backfill, cleanup, one-off data script, or any code path that mutates existing records, first identify the assumptions the change makes about current data.
+- Add or update pre-flight `*.dile.yaml` tests for those assumptions by default. Do this proactively; do not wait for the user to ask for pre-flight tests.
+- If no useful pre-flight test is possible, state why and note the residual risk before making the data-changing edit.
+- After the change, add or update post-change checks when the outcome can be validated with SQL.
+- Run the relevant `datadile test` command when a data source is available; otherwise, tell the user exactly which command should be run and why it was not run locally.
 
 ## Use Cases
 
+- Add pre-flight Datadile checks before data migrations, backfills, one-off scripts, or other jobs that depend on existing data shape or quality. This is the default for data-changing work unless the user explicitly declines.
+- Turn implicit application-code assumptions into explicit data invariants, such as uniqueness, allowed statuses, non-null relationships, referential integrity, or valid state transitions.
+- Add post-change Datadile checks to confirm migrations, backfills, cleanup jobs, or data repairs produced the expected results.
 - Add or update `*.dile.yaml` files near application code.
 - Review data tests for safe SQL, clear expectations, and valid severities.
 - Create or edit `datadile.yaml` without storing secrets in the file.

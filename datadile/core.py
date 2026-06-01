@@ -16,6 +16,7 @@ import httpx
 import sqlparse
 import yaml
 from rich.console import Console
+from rich.prompt import Confirm
 from rich.table import Table
 from sqlalchemy import create_engine, text
 
@@ -24,7 +25,41 @@ from .config import get_api_host, get_api_key, get_data_source_config
 console = Console()
 
 DATA_TEST_FILE_PATTERN = "*.dile.yaml"
-DEFAULT_SKILL_INSTALL_PATH = Path(".opencode") / "skills" / "datadile" / "SKILL.md"
+DEFAULT_CONFIG_TEMPLATE_PATH = Path("datadile.yaml")
+DEFAULT_SKILL_AGENT = "opencode"
+DEFAULT_AGENTS_SKILL_INSTALL_PATH = Path(".agents") / "skills" / "datadile" / "SKILL.md"
+GLOBAL_AGENTS_SKILL_INSTALL_PATH = Path("~") / ".agents" / "skills" / "datadile" / "SKILL.md"
+AGENT_SKILL_INSTALL_PATHS = {
+    "opencode": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "claude": Path(".claude") / "skills" / "datadile" / "SKILL.md",
+    "claude-code": Path(".claude") / "skills" / "datadile" / "SKILL.md",
+    "cursor": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "github-copilot": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "copilot": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "openai-codex": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "codex": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "vscode": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "vs-code": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "visual-studio-code": DEFAULT_AGENTS_SKILL_INSTALL_PATH,
+    "snowflake-cortex": Path(".cortex") / "skills" / "datadile" / "SKILL.md",
+    "cortex": Path(".cortex") / "skills" / "datadile" / "SKILL.md",
+}
+GLOBAL_AGENT_SKILL_INSTALL_PATHS = {
+    "opencode": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "claude": Path("~") / ".claude" / "skills" / "datadile" / "SKILL.md",
+    "claude-code": Path("~") / ".claude" / "skills" / "datadile" / "SKILL.md",
+    "cursor": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "github-copilot": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "copilot": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "openai-codex": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "codex": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "vscode": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "vs-code": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "visual-studio-code": GLOBAL_AGENTS_SKILL_INSTALL_PATH,
+    "snowflake-cortex": Path("~") / ".snowflake" / "cortex" / "skills" / "datadile" / "SKILL.md",
+    "cortex": Path("~") / ".snowflake" / "cortex" / "skills" / "datadile" / "SKILL.md",
+}
+DEFAULT_SKILL_INSTALL_PATH = AGENT_SKILL_INSTALL_PATHS[DEFAULT_SKILL_AGENT]
 DATA_TEST_RUNS_ENDPOINT = "/api/datatests/runs/"
 DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS = 10
 SEVERITIES = {"LOW", "MEDIUM", "HIGH"}
@@ -71,6 +106,26 @@ WRITE_STATEMENT_KEYWORDS = {
     "UPDATE",
     "VACUUM",
 }
+CONFIG_TEMPLATE = """# Optional. Only required for premium server-backed features.
+api_key_env: DATADILE_API_KEY
+
+# Optional. Used by tests that do not set data_source.
+default_data_source: main
+
+data_sources:
+  main:
+    type: postgresql
+    host: localhost
+    port: 5432
+    user: myuser
+    database: mydb
+    password_env: DATADILE_DATA_SOURCE_PASSWORD
+
+# Premium server-backed data source example:
+# data_sources:
+#   main:
+#     id: ds_abc123
+"""
 
 
 @dataclass(frozen=True)
@@ -464,13 +519,34 @@ def test_command(args: argparse.Namespace) -> None:
 
 def install_skill_command(args: argparse.Namespace) -> None:
     """Install the bundled Datadile coding-agent skill file."""
-    destination = Path(args.destination)
+    default_destination = GLOBAL_AGENT_SKILL_INSTALL_PATHS[args.agent] if args.global_install else AGENT_SKILL_INSTALL_PATHS[args.agent]
+    destination = Path(args.destination or default_destination).expanduser()
+    destination = destination if destination.is_absolute() else Path.cwd() / destination
+
+    if not args.yes and not Confirm.ask(f"Install Datadile skill to {destination}?", default=False):
+        console.print("Installation cancelled.")
+        return
+
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     with resources.path("datadile.skill", "SKILL.md") as source:
         shutil.copyfile(source, destination)
 
     console.print(f"Installed Datadile skill to {destination}")
+
+
+def init_command(args: argparse.Namespace) -> None:
+    """Write a starter Datadile config file."""
+    destination = Path(args.destination or DEFAULT_CONFIG_TEMPLATE_PATH).expanduser()
+    destination = destination if destination.is_absolute() else Path.cwd() / destination
+
+    if destination.exists() and not args.force:
+        console.print(f"Config file already exists at {destination}. Use --force to overwrite it.")
+        sys.exit(1)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(CONFIG_TEMPLATE)
+    console.print(f"Wrote starter Datadile config to {destination}")
 
 
 def main() -> None:
@@ -482,13 +558,34 @@ def main() -> None:
     test_parser.add_argument("filepath", nargs="?", help="Path to a YAML data test file")
     test_parser.set_defaults(func=test_command)
 
+    init_parser = subparsers.add_parser("init", help="Write a starter datadile.yaml config file")
+    init_parser.add_argument(
+        "destination",
+        nargs="?",
+        help="Where to write the config file (default: datadile.yaml)",
+    )
+    init_parser.add_argument("--force", action="store_true", help="Overwrite the destination if it already exists")
+    init_parser.set_defaults(func=init_command)
+
     skill_parser = subparsers.add_parser("install-skill", help="Install the bundled coding-agent skill")
     skill_parser.add_argument(
         "destination",
         nargs="?",
-        default=DEFAULT_SKILL_INSTALL_PATH,
-        help=f"Where to write SKILL.md (default: {DEFAULT_SKILL_INSTALL_PATH})",
+        help="Where to write the skill file (overrides --agent default)",
     )
+    skill_parser.add_argument(
+        "--agent",
+        choices=sorted(AGENT_SKILL_INSTALL_PATHS),
+        default=DEFAULT_SKILL_AGENT,
+        help=f"Coding agent to install for (default: {DEFAULT_SKILL_AGENT})",
+    )
+    skill_parser.add_argument(
+        "--global",
+        dest="global_install",
+        action="store_true",
+        help="Install to the selected agent's user-level skills directory",
+    )
+    skill_parser.add_argument("-y", "--yes", action="store_true", help="Install without asking for confirmation")
     skill_parser.set_defaults(func=install_skill_command)
 
     args = parser.parse_args()
