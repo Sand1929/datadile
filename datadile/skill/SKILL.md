@@ -82,7 +82,7 @@ data_sources:
     port: 5432
     user: myuser
     database: mydb
-    password_env: DATADILE_DATA_SOURCE_PASSWORD
+    password_env: DATABASE_PASSWORD
 ```
 
 Server-backed data sources can reference an ID, but remote execution is not implemented in the local package yet:

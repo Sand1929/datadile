@@ -109,7 +109,6 @@ WRITE_STATEMENT_KEYWORDS = {
 CONFIG_TEMPLATE = """# Optional. Only required for premium server-backed features.
 api_key_env: DATADILE_API_KEY
 
-# Optional. Used by tests that do not set data_source.
 default_data_source: main
 
 data_sources:
@@ -119,7 +118,7 @@ data_sources:
     port: 5432
     user: myuser
     database: mydb
-    password_env: DATADILE_DATA_SOURCE_PASSWORD
+    password_env: DATABASE_PASSWORD
 
 # Premium server-backed data source example:
 # data_sources:
