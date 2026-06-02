@@ -184,7 +184,7 @@ datadile context --data-source app_db --column orders.status
 datadile context --data-source app_db --table orders --format json
 ```
 
-The context command loads local `*.dile.yaml` files and, when an API key is configured, fetches matching uploaded tests from Datadile Cloud. Relevance is based on referenced tables and columns in the same data source, not repository or file proximity.
+The context command loads local `*.dile.yaml` files. If an API key is configured, it also fetches matching uploaded tests from Datadile Cloud to determine what tests are currently passing and failing.
 
 ## Coding Agent Skill
 
@@ -233,9 +233,7 @@ export DATADILE_API_KEY='your_api_key_here'
 api_key_env: DATADILE_API_KEY
 ```
 
-If an API key is configured, Datadile records completed local test runs in Datadile Cloud. For Git repositories, cloud run file paths are recorded as `<repo-name>/<path-from-repo-root>` using `remote.origin.url`; outside a Git repository, Datadile records the local test file path without the repo prefix.
-
-If an API key is configured, `datadile context` also requests uploaded test definitions from Datadile Cloud for the requested data source and tables/columns. The command is read-only and does not request actual result values by default.
+If an API key is configured, Datadile records completed local test runs in Datadile Cloud. Datadile monitors runs to alert you about failures and anomalies within your tests. Datadile also draws on this data to provide context to your coding agent, allowing it to take into account what data assumptions are failing while writing your code.
 
 Data source entries can also reference an ID if the connection details are stored on your Datadile account:
 
