@@ -62,6 +62,7 @@ GLOBAL_AGENT_SKILL_INSTALL_PATHS = {
 DEFAULT_SKILL_INSTALL_PATH = AGENT_SKILL_INSTALL_PATHS[DEFAULT_SKILL_AGENT]
 DATA_TEST_RUNS_ENDPOINT = "/api/datatests/runs/"
 DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS = 10
+DATA_TEST_RESULT_ROW_LIMIT = 100
 SEVERITIES = {"LOW", "MEDIUM", "HIGH"}
 SERVER_EXPECT_OPERATORS = {
     "=": "eq",
@@ -148,6 +149,12 @@ class DataTestResult:
     row_count: int | None = None
     passed: bool = False
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class QueryExecutionResult:
+    rows: list[dict[str, Any]]
+    row_count: int
 
 
 @dataclass(frozen=True)
@@ -260,7 +267,7 @@ def _parse_expected_value(value: str) -> Any:
 
 def run_data_tests(tests: list[DataTest], data_source_config: dict | Callable[[str | None], dict]) -> list[DataTestResult]:
     """Execute data tests and return pass/fail results."""
-    query_runners: dict[str | None, Callable[[str], list[dict[str, Any]]]] = {}
+    query_runners: dict[str | None, Callable[[str], QueryExecutionResult]] = {}
     if callable(data_source_config):
         for data_source in dict.fromkeys(test.data_source for test in tests):
             query_runners[data_source] = _build_query_runner(data_source_config(data_source))
@@ -276,9 +283,9 @@ def run_data_tests(tests: list[DataTest], data_source_config: dict | Callable[[s
             else:
                 run_query = default_run_query
 
-            rows = run_query(test.query)
-            actual = _normalize_query_result(rows)
-            row_count = len(rows)
+            query_result = run_query(test.query)
+            actual = _normalize_query_result(query_result.rows)
+            row_count = query_result.row_count
             passed = evaluate_expectation(actual, test.expect, subjects={"row_count": row_count})
             results.append(DataTestResult(test=test, actual=actual, row_count=row_count, passed=passed))
         except Exception as exc:
@@ -287,7 +294,7 @@ def run_data_tests(tests: list[DataTest], data_source_config: dict | Callable[[s
     return results
 
 
-def _build_query_runner(data_source_config: dict) -> Callable[[str], list[dict[str, Any]]]:
+def _build_query_runner(data_source_config: dict) -> Callable[[str], QueryExecutionResult]:
     """Build a read-only query runner for a configured data source."""
     if data_source_config.get("id"):
         data_source_id = data_source_config["id"]
@@ -319,11 +326,17 @@ def _build_query_runner(data_source_config: dict) -> Callable[[str], list[dict[s
                 f"Original error: {exc}"
             ) from None
 
-        def run_postgres_query(query: str) -> list[dict[str, Any]]:
+        def run_postgres_query(query: str) -> QueryExecutionResult:
             """Run a validated read-only query against PostgreSQL."""
             _validate_read_only_query(query)
             with engine.connect() as conn:
-                return [dict(row._mapping) for row in conn.execute(text(query))]
+                rows = []
+                row_count = 0
+                for row in conn.execute(text(query)):
+                    row_count += 1
+                    if len(rows) < DATA_TEST_RESULT_ROW_LIMIT:
+                        rows.append(dict(row._mapping))
+                return QueryExecutionResult(rows=rows, row_count=row_count)
 
         return run_postgres_query
 

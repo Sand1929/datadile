@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from datadile import core
-from datadile.core import DataTest, DataTestResult, _build_query_runner, _cloud_run_payload, run_data_tests
+from datadile.core import DataTest, DataTestResult, QueryExecutionResult, _build_query_runner, _cloud_run_payload, run_data_tests
 
 
 def test_build_query_runner_checks_database_connection_with_timeout(monkeypatch):
@@ -89,6 +89,53 @@ def test_build_query_runner_raises_friendly_connection_error(monkeypatch):
     assert exc_info.value.__cause__ is None
 
 
+def test_build_query_runner_limits_rows_but_counts_full_result(monkeypatch):
+    """PostgreSQL runners retain a bounded sample while counting every result row."""
+
+    class FakeRow:
+        def __init__(self, mapping):
+            self._mapping = mapping
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def execute(self, statement):
+            if str(statement) == "SELECT 1":
+                return []
+            return [FakeRow({"id": value}) for value in range(150)]
+
+    class FakeEngine:
+        def execution_options(self, **options):
+            return self
+
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(core, "create_engine", lambda url, **kwargs: FakeEngine())
+
+    run_query = _build_query_runner(
+        {
+            "type": "postgresql",
+            "user": "user",
+            "password": "password",
+            "host": "localhost",
+            "port": 5432,
+            "database": "datadile",
+        }
+    )
+
+    result = run_query("select id from orders")
+
+    assert result.row_count == 150
+    assert len(result.rows) == 100
+    assert result.rows[0] == {"id": 0}
+    assert result.rows[-1] == {"id": 99}
+
+
 def test_run_data_tests_raises_when_database_connection_fails(monkeypatch):
     """Connection failures are raised before individual test execution begins."""
 
@@ -115,10 +162,13 @@ def test_run_data_tests_supports_row_count_expectations(monkeypatch):
     """row_count expectations compare cardinality while preserving inspectable rows."""
 
     def fake_build_query_runner(data_source_config):
-        return lambda query: [
-            {"id": 1, "status": "failed"},
-            {"id": 2, "status": "failed"},
-        ]
+        return lambda query: QueryExecutionResult(
+            rows=[
+                {"id": 1, "status": "failed"},
+                {"id": 2, "status": "failed"},
+            ],
+            row_count=2,
+        )
 
     monkeypatch.setattr(core, "_build_query_runner", fake_build_query_runner)
 
@@ -145,7 +195,11 @@ def test_run_data_tests_supports_row_count_expectations(monkeypatch):
 def test_run_data_tests_supports_zero_row_count_expectations(monkeypatch):
     """row_count can assert that a row-returning query found no rows."""
 
-    monkeypatch.setattr(core, "_build_query_runner", lambda data_source_config: lambda query: [])
+    monkeypatch.setattr(
+        core,
+        "_build_query_runner",
+        lambda data_source_config: lambda query: QueryExecutionResult(rows=[], row_count=0),
+    )
 
     results = run_data_tests(
         [
