@@ -540,6 +540,28 @@ def print_results(results: list[DataTestResult]) -> None:
     console.print(f"{len(results) - len(failures)} passed, {len(failures)} failed")
 
 
+def write_results_file(results: list[DataTestResult], path: str | Path) -> None:
+    """Write complete data test results to a JSON file."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = [
+        {
+            "status": "passed" if result.passed else "error" if result.error else "failed",
+            "severity": result.test.severity,
+            "filepath": result.test.filepath,
+            "name": result.test.name,
+            "description": result.test.description,
+            "query": result.test.query,
+            "expect": result.test.expect,
+            "actual": _json_safe(result.actual),
+            "row_count": result.row_count,
+            "error": result.error,
+        }
+        for result in results
+    ]
+    destination.write_text(json.dumps(payload, indent=2) + "\n")
+
+
 def test_command(args: argparse.Namespace) -> None:
     """Run the CLI data test command."""
     test_paths = [Path(args.filepath)] if args.filepath else discover_data_test_files()
@@ -554,6 +576,9 @@ def test_command(args: argparse.Namespace) -> None:
     results = run_data_tests(tests, get_data_source_config)
     finished_at = datetime.now(timezone.utc)
     print_results(results)
+    if args.results_file:
+        write_results_file(results, args.results_file)
+        console.print(f"Wrote full results to {Path(args.results_file)}")
     record_data_test_runs(results, finished_at)
 
     if any(not result.passed for result in results):
@@ -611,6 +636,7 @@ def main() -> None:
 
     test_parser = subparsers.add_parser("test", help="Run YAML data tests")
     test_parser.add_argument("filepath", nargs="?", help="Path to a YAML data test file")
+    test_parser.add_argument("--results-file", help="Write full test results to a JSON file")
     test_parser.set_defaults(func=test_command)
 
     context_parser = subparsers.add_parser("context", help="Show test context for tables and columns")

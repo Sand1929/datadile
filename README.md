@@ -78,6 +78,11 @@ datadile test
 ```
 
 Datadile prints a results table and a summary such as `1 passed, 0 failed`.
+To save full, untruncated results to JSON, pass `--results-file`:
+
+```bash
+datadile test --results-file datadile-results.json
+```
 
 ## Data Tests
 
@@ -187,6 +192,7 @@ Add more named entries under `data_sources` when tests need to run against multi
 ```bash
 datadile test
 datadile test <path/to/file.dile.yaml>
+datadile test --results-file datadile-results.json
 ```
 
 With no path, Datadile recursively discovers only files matching `*.dile.yaml` from the current directory. Other YAML files, such as `docker-compose.yaml`, GitHub Actions workflows, Helm values, and OpenAPI specs, are ignored.

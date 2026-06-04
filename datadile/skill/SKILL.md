@@ -16,6 +16,7 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 - After the change, add or update post-change checks when the outcome can be validated with SQL.
 - When adding tests meant to run before and after a migration or backfill, put the pre-flight and post-change tests in separate `*.dile.yaml` files so the agent can run the pre-flight tests, then the migration or backfill, then the post-change tests.
 - Run the relevant `datadile test` command when a data source is available; otherwise, tell the user exactly which command should be run and why it was not run locally.
+- When full test output matters, run `datadile test --results-file <path>` to write untruncated JSON results in addition to the console table.
 
 ## Use Cases
 
@@ -37,6 +38,7 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 - `datadile context` filters relevance by same data source and overlapping referenced tables/columns, not by repository or file proximity.
 - Keep passwords and API keys in environment variables. Use `password_env` and `api_key_env`; do not put secret values directly in YAML.
 - PostgreSQL is the local execution target today. Keep test YAML generic enough that other query engines can be added later.
+- If a test query may return many rows, first decide whether failed rows need to be inspected. If row details matter, return a bounded sample with SQL such as `limit 100`. If row details do not matter and the assertion is about total cardinality, use an aggregate query such as `select count(*)` instead of limiting rows.
 
 ## Data Test Examples
 
@@ -128,5 +130,7 @@ data_sources:
 - Preserve the `*.dile.yaml` discovery rule unless the user explicitly asks to broaden it.
 - Do not add support for inline passwords or API keys.
 - Keep YAML examples quoted around expectation strings, especially values beginning with comparison operators.
+- Prefer bounded result sets for row-inspection tests; add an explicit SQL `limit` when a query could return many rows.
 - When changing CLI behavior, keep `datadile test [filepath]` working.
+- Keep `datadile test --results-file <path>` available for agents and users who need complete result details beyond the console table.
 - When changing config behavior, keep local `datadile.yaml` precedence over `~/.datadile/datadile.yaml`.
