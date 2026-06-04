@@ -70,6 +70,21 @@ tests:
     expect: "= [1, 2, 3]"
 ```
 
+Use `row_count` when the query should return inspectable rows but the assertion is about result cardinality:
+
+```yaml
+tests:
+  - name: failed_orders_are_limited
+    description: There should be at most one failed order today, with rows shown on failure.
+    query: |
+      select id, status, created_at
+      from orders
+      where status = 'failed'
+        and created_at >= current_date
+      order by created_at desc
+    expect: "row_count <= 1"
+```
+
 ## Config Examples
 
 Local config lives at `./datadile.yaml`; user config lives at `~/.datadile/datadile.yaml`. Local config takes precedence.
@@ -106,6 +121,7 @@ data_sources:
 - Multi-row, one-column results compare as a list, such as `= [1, 2, 3]`.
 - Wider rows compare as dictionaries or lists of dictionaries.
 - Empty result sets normalize to `None`, so use `= null` when that is intentional.
+- `row_count <operator> <value>` compares the number of rows returned, such as `row_count = 0` or `row_count <= 10`.
 
 ## Coding Guidance
 

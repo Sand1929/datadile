@@ -122,6 +122,21 @@ tests:
 
 For one-row, one-column query results, Datadile compares the scalar value. For multi-row, one-column results, it compares a list of values. For wider results, it compares dictionaries or lists of dictionaries.
 
+Use `row_count` when the query should return inspectable rows but the assertion is about how many rows were returned:
+
+```yaml
+tests:
+  - name: failed_orders_are_limited
+    description: There should be at most one failed order today, with rows shown on failure.
+    query: |
+      select id, status, created_at
+      from orders
+      where status = 'failed'
+        and created_at >= current_date
+      order by created_at desc
+    expect: "row_count <= 1"
+```
+
 ## Configuration
 
 Datadile looks for a YAML config file in two locations. Local config takes precedence:

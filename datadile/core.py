@@ -80,6 +80,8 @@ EXPECT_OPERATORS = {
     "<": operator.lt,
 }
 READ_ONLY_STATEMENT_STARTS = {"SELECT", "WITH", "SHOW", "EXPLAIN", "VALUES"}
+DEFAULT_EXPECTED_SUBJECT = "result"
+EXPECTATION_SUBJECTS = {"row_count"}
 WRITE_STATEMENT_KEYWORDS = {
     "ALTER",
     "CALL",
@@ -143,8 +145,16 @@ class DataTest:
 class DataTestResult:
     test: DataTest
     actual: Any = None
+    row_count: int | None = None
     passed: bool = False
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class ExpectedComparison:
+    subject: str
+    operator: str
+    value: Any
 
 
 def _build_postgres_connection_url(data_source_config: dict) -> str:
@@ -202,21 +212,38 @@ def _parse_data_test(raw: Any, index: int, test_path: Path | None = None) -> Dat
     )
 
 
-def evaluate_expectation(actual: Any, expectation: str) -> bool:
+def evaluate_expectation(actual: Any, expectation: str, subjects: dict[str, Any] | None = None) -> bool:
     """Compare an actual value against a textual expectation expression."""
-    op_symbol, expected = _parse_expectation(expectation)
-    return EXPECT_OPERATORS[op_symbol](actual, expected)
+    comparison = _parse_expectation(expectation)
+    actual_value = _comparison_actual_value(comparison, actual, subjects or {})
+    return EXPECT_OPERATORS[comparison.operator](actual_value, comparison.value)
 
 
-def _parse_expectation(expectation: str) -> tuple[str, Any]:
-    """Parse an expectation into an operator symbol and expected value."""
+def _comparison_actual_value(comparison: ExpectedComparison, actual: Any, subjects: dict[str, Any]) -> Any:
+    """Return the actual value for the expectation subject."""
+    if comparison.subject == DEFAULT_EXPECTED_SUBJECT:
+        return actual
+    if comparison.subject not in subjects:
+        raise ValueError(f"Expectation subject '{comparison.subject}' is not available for this result.")
+    return subjects[comparison.subject]
+
+
+def _parse_expectation(expectation: str) -> ExpectedComparison:
+    """Parse an expectation into a subject, operator symbol, and expected value."""
     expression = expectation.strip()
+    subject = DEFAULT_EXPECTED_SUBJECT
+    for candidate in sorted(EXPECTATION_SUBJECTS):
+        if expression == candidate or expression.startswith(f"{candidate} "):
+            subject = candidate
+            expression = expression[len(candidate) :].strip()
+            break
+
     for op_symbol in sorted(EXPECT_OPERATORS, key=len, reverse=True):
         if expression.startswith(op_symbol):
             rhs = expression[len(op_symbol) :].strip()
             if not rhs:
                 raise ValueError(f"Expectation '{expectation}' is missing a comparison value.")
-            return op_symbol, _parse_expected_value(rhs)
+            return ExpectedComparison(subject, op_symbol, _parse_expected_value(rhs))
     raise ValueError(
         f"Expectation '{expectation}' must start with one of: "
         f"{', '.join(sorted(EXPECT_OPERATORS, key=len, reverse=True))}."
@@ -251,8 +278,9 @@ def run_data_tests(tests: list[DataTest], data_source_config: dict | Callable[[s
 
             rows = run_query(test.query)
             actual = _normalize_query_result(rows)
-            passed = evaluate_expectation(actual, test.expect)
-            results.append(DataTestResult(test=test, actual=actual, passed=passed))
+            row_count = len(rows)
+            passed = evaluate_expectation(actual, test.expect, subjects={"row_count": row_count})
+            results.append(DataTestResult(test=test, actual=actual, row_count=row_count, passed=passed))
         except Exception as exc:
             results.append(DataTestResult(test=test, passed=False, error=str(exc)))
 
@@ -427,20 +455,23 @@ def _cloud_filepath(path: str | None) -> str:
 
 def _cloud_run_payload(result: DataTestResult, finished_at: datetime) -> dict[str, Any]:
     """Convert a local data test result into the cloud run-create payload."""
-    expected_operator, expected_value = _parse_expectation(result.test.expect)
+    comparison = _parse_expectation(result.test.expect)
     payload = {
         "filepath": _cloud_filepath(result.test.filepath),
         "name": result.test.name,
         "description": result.test.description,
         "query": result.test.query,
-        "expected_operator": SERVER_EXPECT_OPERATORS[expected_operator],
-        "expected_value": _json_safe(expected_value),
+        "expected_subject": comparison.subject,
+        "expected_operator": SERVER_EXPECT_OPERATORS[comparison.operator],
+        "expected_value": _json_safe(comparison.value),
         "severity": result.test.severity,
         "status": "PASSED" if result.passed else "ERROR" if result.error else "FAILED",
         "actual_value": _json_safe(result.actual),
         "error_message": result.error or "",
         "finished_at": finished_at.isoformat(),
     }
+    if comparison.subject == "row_count":
+        payload["actual_row_count"] = result.row_count
     if result.test.identity:
         payload["identity"] = result.test.identity
     return payload

@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from datadile import core
-from datadile.core import DataTest, _build_query_runner, run_data_tests
+from datadile.core import DataTest, DataTestResult, _build_query_runner, _cloud_run_payload, run_data_tests
 
 
 def test_build_query_runner_checks_database_connection_with_timeout(monkeypatch):
@@ -107,3 +109,84 @@ def test_run_data_tests_raises_when_database_connection_fails(monkeypatch):
             ],
             {"type": "postgresql"},
         )
+
+
+def test_run_data_tests_supports_row_count_expectations(monkeypatch):
+    """row_count expectations compare cardinality while preserving inspectable rows."""
+
+    def fake_build_query_runner(data_source_config):
+        return lambda query: [
+            {"id": 1, "status": "failed"},
+            {"id": 2, "status": "failed"},
+        ]
+
+    monkeypatch.setattr(core, "_build_query_runner", fake_build_query_runner)
+
+    results = run_data_tests(
+        [
+            DataTest(
+                name="failed orders exist",
+                description="Failed orders should be inspectable.",
+                query="select id, status from orders where status = 'failed'",
+                expect="row_count > 1",
+            )
+        ],
+        {"type": "postgresql"},
+    )
+
+    assert results[0].passed is True
+    assert results[0].row_count == 2
+    assert results[0].actual == [
+        {"id": 1, "status": "failed"},
+        {"id": 2, "status": "failed"},
+    ]
+
+
+def test_run_data_tests_supports_zero_row_count_expectations(monkeypatch):
+    """row_count can assert that a row-returning query found no rows."""
+
+    monkeypatch.setattr(core, "_build_query_runner", lambda data_source_config: lambda query: [])
+
+    results = run_data_tests(
+        [
+            DataTest(
+                name="no failed orders",
+                description="There should be no failed orders.",
+                query="select id, status from orders where status = 'failed'",
+                expect="row_count = 0",
+            )
+        ],
+        {"type": "postgresql"},
+    )
+
+    assert results[0].passed is True
+    assert results[0].row_count == 0
+    assert results[0].actual is None
+
+
+def test_cloud_run_payload_preserves_row_count_expectation_subject(monkeypatch):
+    """Cloud uploads distinguish row_count assertions from scalar result assertions."""
+    monkeypatch.setattr(core, "_cloud_filepath", lambda path: "orders.dile.yaml")
+    finished_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    payload = _cloud_run_payload(
+        DataTestResult(
+            test=DataTest(
+                name="failed_orders_are_limited",
+                description="Failed orders should be limited.",
+                query="select id from orders where status = 'failed'",
+                expect="row_count <= 1",
+                filepath="orders.dile.yaml",
+            ),
+            actual=[{"id": 1}, {"id": 2}],
+            row_count=2,
+            passed=False,
+        ),
+        finished_at,
+    )
+
+    assert payload["expected_subject"] == "row_count"
+    assert payload["expected_operator"] == "lte"
+    assert payload["expected_value"] == 1
+    assert payload["actual_row_count"] == 2
+    assert payload["actual_value"] == [{"id": 1}, {"id": 2}]
