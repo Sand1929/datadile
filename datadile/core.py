@@ -15,9 +15,11 @@ from typing import Any, Callable
 import httpx
 import sqlparse
 import yaml
+from rich import box
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
+from rich.text import Text
 
 from .config import CONFIG_FILENAME, USER_CONFIG_PATH, get_api_host, get_api_key, get_data_source_config
 
@@ -703,20 +705,27 @@ def record_data_test_runs(results: list[DataTestResult], finished_at: datetime) 
 
 def print_results(results: list[DataTestResult]) -> None:
     """Render data test results to the console."""
-    table = Table(title="Datadile Data Tests")
-    table.add_column("Status")
-    table.add_column("Severity")
-    table.add_column("Name")
-    table.add_column("Expect")
-    table.add_column("Actual")
+    table = Table(
+        title="Datadile Data Tests",
+        title_style="bold cyan",
+        header_style="bold",
+        box=box.ROUNDED,
+        expand=True,
+    )
+    table.add_column("Status", justify="center", no_wrap=True)
+    table.add_column("Severity", no_wrap=True)
+    table.add_column("Name", style="bold")
+    table.add_column("Expect", style="cyan")
+    table.add_column("Actual / Error", overflow="fold")
 
     for result in results:
-        status = "PASS" if result.passed else "FAIL"
-        style = "green" if result.passed else "red"
-        actual = result.error if result.error else repr(result.actual)
+        status = "PASS" if result.passed else "ERROR" if result.error else "FAIL"
+        status_style = "bold green" if result.passed else "bold magenta" if result.error else "bold red"
+        severity_style = {"HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(result.test.severity, "")
+        actual = result.error if result.error else _format_console_value(result.actual)
         table.add_row(
-            f"[{style}]{status}[/{style}]",
-            result.test.severity,
+            Text(status, style=status_style),
+            Text(result.test.severity, style=severity_style),
             result.test.name,
             result.test.expect,
             actual,
@@ -725,7 +734,16 @@ def print_results(results: list[DataTestResult]) -> None:
     console.print(table)
 
     failures = [result for result in results if not result.passed]
-    console.print(f"{len(results) - len(failures)} passed, {len(failures)} failed")
+    summary_style = "bold green" if not failures else "bold red"
+    console.print(f"[{summary_style}]{len(results) - len(failures)} passed, {len(failures)} failed[/{summary_style}]")
+
+
+def _format_console_value(value: Any) -> str:
+    """Format actual values for a readable console table."""
+    safe_value = _json_safe(value)
+    if isinstance(safe_value, (dict, list)):
+        return json.dumps(safe_value, indent=2)
+    return json.dumps(safe_value)
 
 
 def write_results_file(results: list[DataTestResult], path: str | Path) -> None:

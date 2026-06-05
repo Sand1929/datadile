@@ -1,9 +1,11 @@
 import json
 import sys
 from datetime import datetime, timezone
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console
 
 from datadile import core
 from datadile.core import (
@@ -12,6 +14,7 @@ from datadile.core import (
     QueryExecutionResult,
     _build_query_runner,
     _cloud_run_payload,
+    print_results,
     run_data_tests,
     write_results_file,
 )
@@ -511,3 +514,45 @@ def test_write_results_file_preserves_full_result_details(tmp_path):
     }
     assert payload[1]["status"] == "error"
     assert payload[1]["error"] == "relation does not exist"
+
+
+def test_print_results_renders_readable_table(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(core, "console", Console(file=output, force_terminal=False, width=120))
+
+    print_results(
+        [
+            DataTestResult(
+                test=DataTest(
+                    name="failed_orders_are_limited",
+                    description="Failed orders should be limited.",
+                    query="select id, status from orders where status = 'failed'",
+                    expect="row_count <= 1",
+                    severity="HIGH",
+                ),
+                actual=[{"id": 1, "status": "failed"}, {"id": 2, "status": "failed"}],
+                row_count=2,
+                passed=False,
+            ),
+            DataTestResult(
+                test=DataTest(
+                    name="query_errors_are_recorded",
+                    description="Errors should be inspectable.",
+                    query="select * from missing_table",
+                    expect="= 0",
+                ),
+                passed=False,
+                error="relation does not exist",
+            ),
+        ]
+    )
+
+    rendered = output.getvalue()
+
+    assert "Datadile Data Tests" in rendered
+    assert "Actual / Error" in rendered
+    assert "FAIL" in rendered
+    assert "ERROR" in rendered
+    assert '"status": "failed"' in rendered
+    assert "relation does not exist" in rendered
+    assert "0 passed, 2 failed" in rendered
