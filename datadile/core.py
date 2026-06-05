@@ -62,6 +62,7 @@ GLOBAL_AGENT_SKILL_INSTALL_PATHS = {
 DEFAULT_SKILL_INSTALL_PATH = AGENT_SKILL_INSTALL_PATHS[DEFAULT_SKILL_AGENT]
 DATA_TEST_RUNS_ENDPOINT = "/api/datatests/runs/"
 DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS = 10
+DEFAULT_MONGODB_CONNECT_TIMEOUT_SECONDS = 10
 DATA_TEST_RESULT_ROW_LIMIT = 100
 SEVERITIES = {"LOW", "MEDIUM", "HIGH"}
 SERVER_EXPECT_OPERATORS = {
@@ -122,6 +123,17 @@ data_sources:
     user: myuser
     database: mydb
     password_env: DATABASE_PASSWORD
+
+# MongoDB data source example:
+# data_sources:
+#   main:
+#     type: mongodb
+#     host: localhost
+#     port: 27017
+#     database: mydb
+#     # Optional. Required when user is set.
+#     user: myuser
+#     password_env: MONGODB_PASSWORD
 
 # Premium server-backed data source example:
 # data_sources:
@@ -305,42 +317,175 @@ def _build_query_runner(data_source_config: dict) -> Callable[[str], QueryExecut
 
     data_source_type = str(data_source_config.get("type", "postgresql")).lower()
     if data_source_type in {"postgres", "postgresql"}:
-        engine = create_engine(
-            _build_postgres_connection_url(data_source_config),
-            connect_args={"connect_timeout": DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS},
-        ).execution_options(
-            postgresql_readonly=True,
-        )
+        return _build_postgres_query_runner(data_source_config)
 
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-        except Exception as exc:
-            raise RuntimeError(
-                "Could not connect to PostgreSQL database "
-                f"'{data_source_config.get('database')}' at "
-                f"{data_source_config.get('host')}:{data_source_config.get('port')} "
-                f"as user '{data_source_config.get('user')}'. "
-                f"Check datadile.yaml, your password environment variable, and network access. "
-                f"Connection timeout is set to {DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS} seconds. "
-                f"Original error: {exc}"
-            ) from None
-
-        def run_postgres_query(query: str) -> QueryExecutionResult:
-            """Run a validated read-only query against PostgreSQL."""
-            _validate_read_only_query(query)
-            with engine.connect() as conn:
-                rows = []
-                row_count = 0
-                for row in conn.execute(text(query)):
-                    row_count += 1
-                    if len(rows) < DATA_TEST_RESULT_ROW_LIMIT:
-                        rows.append(dict(row._mapping))
-                return QueryExecutionResult(rows=rows, row_count=row_count)
-
-        return run_postgres_query
+    if data_source_type in {"mongo", "mongodb"}:
+        return _build_mongodb_query_runner(data_source_config)
 
     raise ValueError(f"Unsupported data source type '{data_source_type}'.")
+
+
+def _build_postgres_query_runner(data_source_config: dict) -> Callable[[str], QueryExecutionResult]:
+    engine = create_engine(
+        _build_postgres_connection_url(data_source_config),
+        connect_args={"connect_timeout": DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS},
+    ).execution_options(
+        postgresql_readonly=True,
+    )
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not connect to PostgreSQL database "
+            f"'{data_source_config.get('database')}' at "
+            f"{data_source_config.get('host')}:{data_source_config.get('port')} "
+            f"as user '{data_source_config.get('user')}'. "
+            f"Check datadile.yaml, your password environment variable, and network access. "
+            f"Connection timeout is set to {DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS} seconds. "
+            f"Original error: {exc}"
+        ) from None
+
+    def run_postgres_query(query: str) -> QueryExecutionResult:
+        """Run a validated read-only query against PostgreSQL."""
+        _validate_read_only_query(query)
+        with engine.connect() as conn:
+            rows = []
+            row_count = 0
+            for row in conn.execute(text(query)):
+                row_count += 1
+                if len(rows) < DATA_TEST_RESULT_ROW_LIMIT:
+                    rows.append(dict(row._mapping))
+            return QueryExecutionResult(rows=rows, row_count=row_count)
+
+    return run_postgres_query
+
+
+def _build_mongodb_query_runner(data_source_config: dict) -> Callable[[str], QueryExecutionResult]:
+    try:
+        from pymongo import MongoClient
+    except ImportError as exc:
+        raise RuntimeError("MongoDB data sources require the pymongo package to be installed.") from exc
+
+    client_kwargs: dict[str, Any] = {"serverSelectionTimeoutMS": DEFAULT_MONGODB_CONNECT_TIMEOUT_SECONDS * 1000}
+    if data_source_config.get("uri"):
+        client_args = [data_source_config["uri"]]
+    else:
+        client_args = []
+        client_kwargs.update(
+            {
+                "host": data_source_config.get("host", "localhost"),
+                "port": int(data_source_config.get("port", 27017)),
+            }
+        )
+        if data_source_config.get("user"):
+            client_kwargs["username"] = data_source_config["user"]
+            client_kwargs["password"] = data_source_config["password"]
+        if data_source_config.get("auth_source"):
+            client_kwargs["authSource"] = data_source_config["auth_source"]
+
+    client = MongoClient(*client_args, **client_kwargs)
+    database_name = data_source_config.get("database")
+    try:
+        client.admin.command("ping")
+    except Exception as exc:
+        target = data_source_config.get("uri") or f"{data_source_config.get('host')}:{data_source_config.get('port')}"
+        raise RuntimeError(
+            "Could not connect to MongoDB database "
+            f"'{database_name}' at {target}. "
+            f"Check datadile.yaml, your MongoDB environment variables, and network access. "
+            f"Connection timeout is set to {DEFAULT_MONGODB_CONNECT_TIMEOUT_SECONDS} seconds. "
+            f"Original error: {exc}"
+        ) from None
+
+    database = client[database_name]
+
+    def run_mongodb_query(query: str) -> QueryExecutionResult:
+        spec = _parse_mongodb_query(query)
+        collection = database[spec["collection"]]
+
+        if "pipeline" in spec:
+            cursor = collection.aggregate(spec["pipeline"])
+            return _mongodb_cursor_result(cursor)
+
+        filter_spec = spec.get("filter", {})
+        cursor = collection.find(filter_spec, spec.get("projection"))
+        if "sort" in spec:
+            cursor = cursor.sort(_mongodb_sort_spec(spec["sort"]))
+        if "skip" in spec:
+            cursor = cursor.skip(spec["skip"])
+        if "limit" in spec:
+            cursor = cursor.limit(spec["limit"])
+
+        row_count = max(collection.count_documents(filter_spec) - spec.get("skip", 0), 0)
+        if "limit" in spec:
+            row_count = min(row_count, spec["limit"])
+        if row_count == 0:
+            return QueryExecutionResult(rows=[], row_count=0)
+
+        rows = []
+        for row in cursor.limit(min(row_count, DATA_TEST_RESULT_ROW_LIMIT)):
+            rows.append(dict(row))
+        return QueryExecutionResult(rows=rows, row_count=row_count)
+
+    return run_mongodb_query
+
+
+def _parse_mongodb_query(query: str) -> dict[str, Any]:
+    spec = yaml.safe_load(query)
+    if not isinstance(spec, dict):
+        raise ValueError("MongoDB query must be a YAML or JSON mapping.")
+
+    allowed_fields = {"collection", "filter", "projection", "sort", "skip", "limit", "pipeline"}
+    unknown_fields = sorted(set(spec) - allowed_fields)
+    if unknown_fields:
+        raise ValueError(f"MongoDB query has unsupported field(s): {', '.join(unknown_fields)}.")
+
+    collection = spec.get("collection")
+    if not isinstance(collection, str) or not collection:
+        raise ValueError("MongoDB query must include a collection name.")
+
+    if "pipeline" in spec:
+        if not isinstance(spec["pipeline"], list):
+            raise ValueError("MongoDB pipeline must be a list of aggregation stages.")
+        _validate_mongodb_pipeline_read_only(spec["pipeline"])
+        return spec
+
+    if "filter" in spec and not isinstance(spec["filter"], dict):
+        raise ValueError("MongoDB filter must be a mapping.")
+    if "skip" in spec and (not isinstance(spec["skip"], int) or spec["skip"] < 0):
+        raise ValueError("MongoDB skip must be a non-negative integer.")
+    if "limit" in spec and (not isinstance(spec["limit"], int) or spec["limit"] < 0):
+        raise ValueError("MongoDB limit must be a non-negative integer.")
+    return spec
+
+
+def _validate_mongodb_pipeline_read_only(pipeline: list[Any]) -> None:
+    for stage in pipeline:
+        if not isinstance(stage, dict) or len(stage) != 1:
+            raise ValueError("MongoDB pipeline stages must be single-key mappings.")
+        stage_name = next(iter(stage))
+        if stage_name in {"$out", "$merge"}:
+            raise ValueError(f"MongoDB aggregation pipeline must be read-only; found disallowed stage '{stage_name}'.")
+
+
+def _mongodb_sort_spec(sort: Any) -> Any:
+    if isinstance(sort, dict):
+        return list(sort.items())
+    if isinstance(sort, list):
+        return sort
+    raise ValueError("MongoDB sort must be a mapping or list.")
+
+
+def _mongodb_cursor_result(cursor: Any) -> QueryExecutionResult:
+    rows = []
+    row_count = 0
+    for row in cursor:
+        row_count += 1
+        if len(rows) < DATA_TEST_RESULT_ROW_LIMIT:
+            rows.append(dict(row))
+    return QueryExecutionResult(rows=rows, row_count=row_count)
 
 
 def _validate_read_only_query(query: str) -> None:
@@ -406,6 +551,10 @@ def _normalize_value(value: Any) -> Any:
         if value == value.to_integral_value():
             return int(value)
         return float(value)
+    if hasattr(value, "to_decimal"):
+        return _normalize_value(value.to_decimal())
+    if value.__class__.__module__.startswith("bson"):
+        return str(value)
     return value
 
 

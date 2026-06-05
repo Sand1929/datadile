@@ -20,7 +20,7 @@ Add your project config file. Run this from your project or repo root, or use `-
 datadile init [--global]
 ```
 
-Then fill in `datadile.yaml` with your PostgreSQL connection details:
+Then fill in `datadile.yaml` with your database connection details:
 
 ```yaml
 default_data_source: main

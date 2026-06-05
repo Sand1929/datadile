@@ -1,5 +1,5 @@
 # Optional. Only required for premium server-backed features.
-api_key_env: DATADILE_API_KEY
+# api_key_env: DATADILE_API_KEY
 
 default_data_source: main
 

@@ -37,7 +37,7 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 - `data_source` is optional; without it, Datadile uses `default_data_source` from `datadile.yaml`.
 - `datadile context` filters relevance by same data source and overlapping referenced tables/columns, not by repository or file proximity.
 - Keep passwords and API keys in environment variables. Use `password_env` and `api_key_env`; do not put secret values directly in YAML.
-- PostgreSQL is the local execution target today. Keep test YAML generic enough that other query engines can be added later.
+- PostgreSQL and MongoDB are local execution targets today. Keep test YAML generic enough that other query engines can be added later.
 - If a test query may return many rows, first decide whether failed rows need to be inspected. If row details matter, return a bounded sample with SQL such as `limit 100`. If row details do not matter and the assertion is about total cardinality, use an aggregate query such as `select count(*)` instead of limiting rows.
 
 ## Data Test Examples
@@ -104,6 +104,26 @@ data_sources:
     database: mydb
     password_env: DATABASE_PASSWORD
 ```
+
+MongoDB data sources use `type: mongodb` and either host/port settings or an environment-backed URI:
+
+```yaml
+default_data_source: main
+
+data_sources:
+  main:
+    type: mongodb
+    host: localhost
+    port: 27017
+    database: mydb
+
+  mongo_uri:
+    type: mongodb
+    uri_env: MONGODB_URI
+    database: mydb
+```
+
+MongoDB tests use a YAML or JSON query document with `collection` plus either `filter` for find queries or `pipeline` for aggregation queries. `$out` and `$merge` aggregation stages are rejected.
 
 Server-backed data sources can reference an ID, but remote execution is not implemented in the local package yet:
 

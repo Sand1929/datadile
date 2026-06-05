@@ -11,7 +11,7 @@ DEFAULT_DATA_SOURCE_PASSWORD_ENV = "DATABASE_PASSWORD"
 
 CONFIG_TEMPLATE = """\
 # Optional. Only required for premium server-backed features.
-api_key_env: DATADILE_API_KEY
+# api_key_env: DATADILE_API_KEY
 
 default_data_source: main
 
@@ -91,6 +91,14 @@ def _resolve_data_source_config(data_source: Any, label: str) -> dict[str, Any]:
     if data_source.get("password"):
         raise ValueError(f"Do not put data source passwords in datadile.yaml. Use password_env instead.")
 
+    data_source_type = str(data_source.get("type", "postgresql")).lower()
+    if data_source_type in {"mongo", "mongodb"}:
+        return _resolve_mongodb_data_source_config(data_source, label)
+
+    return _resolve_postgresql_data_source_config(data_source)
+
+
+def _resolve_postgresql_data_source_config(data_source: dict[str, Any]) -> dict[str, Any]:
     password_env = str(data_source.get("password_env", DEFAULT_DATA_SOURCE_PASSWORD_ENV))
     password = os.environ.get(password_env)
     if not password:
@@ -104,6 +112,45 @@ def _resolve_data_source_config(data_source: Any, label: str) -> dict[str, Any]:
         "password": password,
         "database": data_source.get("database"),
     }
+
+
+def _resolve_mongodb_data_source_config(data_source: dict[str, Any], label: str) -> dict[str, Any]:
+    if data_source.get("uri"):
+        raise ValueError(f"Do not put MongoDB URIs in datadile.yaml. Use uri_env instead.")
+
+    database = data_source.get("database")
+    if not database:
+        raise ValueError(f"Missing {label}.database in config file.")
+
+    if data_source.get("uri_env"):
+        uri_env = str(data_source["uri_env"])
+        uri = os.environ.get(uri_env)
+        if not uri:
+            raise ValueError(f"Missing MongoDB URI. Set the {uri_env} environment variable.")
+        return {
+            "type": data_source.get("type", "mongodb"),
+            "uri": uri,
+            "database": database,
+        }
+
+    password_env = str(data_source.get("password_env", DEFAULT_DATA_SOURCE_PASSWORD_ENV))
+    user = data_source.get("user")
+    password = os.environ.get(password_env) if user or data_source.get("password_env") else None
+    if user and not password:
+        raise ValueError(f"Missing MongoDB password. Set the {password_env} environment variable.")
+
+    config = {
+        "type": data_source.get("type", "mongodb"),
+        "host": data_source.get("host", "localhost"),
+        "port": int(data_source.get("port", 27017)),
+        "database": database,
+    }
+    if user:
+        config["user"] = user
+        config["password"] = password
+    if data_source.get("auth_source"):
+        config["auth_source"] = data_source["auth_source"]
+    return config
 
 
 def get_data_source_config(name: str | None = None) -> dict[str, Any]:

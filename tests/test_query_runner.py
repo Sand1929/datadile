@@ -1,5 +1,7 @@
 import json
+import sys
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -143,6 +145,175 @@ def test_build_query_runner_limits_rows_but_counts_full_result(monkeypatch):
     assert len(result.rows) == 100
     assert result.rows[0] == {"id": 0}
     assert result.rows[-1] == {"id": 99}
+
+
+def test_build_query_runner_runs_mongodb_find_queries(monkeypatch):
+    """MongoDB runners execute YAML query documents through read-only find calls."""
+    captured = {}
+    documents = [{"_id": value, "status": "active"} for value in range(150)]
+
+    class FakeCursor:
+        def __init__(self, rows):
+            self.rows = rows
+            self.limit_value = None
+
+        def sort(self, sort):
+            captured["sort"] = sort
+            return self
+
+        def skip(self, skip):
+            captured["skip"] = skip
+            self.rows = self.rows[skip:]
+            return self
+
+        def limit(self, limit):
+            self.limit_value = limit
+            return self
+
+        def __iter__(self):
+            return iter(self.rows[: self.limit_value])
+
+    class FakeCollection:
+        def find(self, filter_spec, projection):
+            captured["filter"] = filter_spec
+            captured["projection"] = projection
+            return FakeCursor(documents)
+
+        def count_documents(self, filter_spec):
+            captured["count_filter"] = filter_spec
+            return len(documents)
+
+    class FakeDatabase:
+        def __getitem__(self, collection_name):
+            captured["collection"] = collection_name
+            return FakeCollection()
+
+    class FakeAdmin:
+        def command(self, command):
+            captured["command"] = command
+
+    class FakeMongoClient:
+        def __init__(self, *args, **kwargs):
+            captured["client_args"] = args
+            captured["client_kwargs"] = kwargs
+            self.admin = FakeAdmin()
+
+        def __getitem__(self, database_name):
+            captured["database"] = database_name
+            return FakeDatabase()
+
+    monkeypatch.setitem(sys.modules, "pymongo", SimpleNamespace(MongoClient=FakeMongoClient))
+
+    run_query = _build_query_runner(
+        {
+            "type": "mongodb",
+            "host": "localhost",
+            "port": 27017,
+            "database": "datadile",
+        }
+    )
+
+    result = run_query(
+        """
+        collection: users
+        filter:
+          status: active
+        projection:
+          _id: 1
+          status: 1
+        sort:
+          _id: 1
+        skip: 10
+        """
+    )
+
+    assert captured["client_args"] == ()
+    assert captured["client_kwargs"] == {
+        "serverSelectionTimeoutMS": 10000,
+        "host": "localhost",
+        "port": 27017,
+    }
+    assert captured["command"] == "ping"
+    assert captured["database"] == "datadile"
+    assert captured["collection"] == "users"
+    assert captured["filter"] == {"status": "active"}
+    assert captured["projection"] == {"_id": 1, "status": 1}
+    assert captured["sort"] == [("_id", 1)]
+    assert captured["skip"] == 10
+    assert result.row_count == 140
+    assert len(result.rows) == 100
+    assert result.rows[0] == {"_id": 10, "status": "active"}
+    assert result.rows[-1] == {"_id": 109, "status": "active"}
+
+
+def test_build_query_runner_runs_mongodb_aggregation_queries(monkeypatch):
+    """MongoDB runners support read-only aggregation pipelines."""
+    captured = {}
+
+    class FakeCollection:
+        def aggregate(self, pipeline):
+            captured["pipeline"] = pipeline
+            return [{"status": "active", "count": 2}]
+
+    class FakeDatabase:
+        def __getitem__(self, collection_name):
+            captured["collection"] = collection_name
+            return FakeCollection()
+
+    class FakeMongoClient:
+        def __init__(self, *args, **kwargs):
+            self.admin = SimpleNamespace(command=lambda command: None)
+
+        def __getitem__(self, database_name):
+            return FakeDatabase()
+
+    monkeypatch.setitem(sys.modules, "pymongo", SimpleNamespace(MongoClient=FakeMongoClient))
+
+    run_query = _build_query_runner({"type": "mongodb", "uri": "mongodb://localhost:27017", "database": "datadile"})
+
+    result = run_query(
+        """
+        collection: users
+        pipeline:
+          - $match:
+              status: active
+          - $group:
+              _id: "$status"
+              count:
+                $sum: 1
+        """
+    )
+
+    assert captured["collection"] == "users"
+    assert captured["pipeline"] == [
+        {"$match": {"status": "active"}},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+    ]
+    assert result == QueryExecutionResult(rows=[{"status": "active", "count": 2}], row_count=1)
+
+
+def test_mongodb_aggregation_rejects_write_stages(monkeypatch):
+    """Aggregation pipelines cannot write through $out or $merge stages."""
+
+    class FakeMongoClient:
+        def __init__(self, *args, **kwargs):
+            self.admin = SimpleNamespace(command=lambda command: None)
+
+        def __getitem__(self, database_name):
+            return SimpleNamespace()
+
+    monkeypatch.setitem(sys.modules, "pymongo", SimpleNamespace(MongoClient=FakeMongoClient))
+
+    run_query = _build_query_runner({"type": "mongodb", "uri": "mongodb://localhost:27017", "database": "datadile"})
+
+    with pytest.raises(ValueError, match="disallowed stage '\$out'"):
+        run_query(
+            """
+            collection: users
+            pipeline:
+              - $out: archived_users
+            """
+        )
 
 
 def test_run_data_tests_raises_when_database_connection_fails(monkeypatch):
