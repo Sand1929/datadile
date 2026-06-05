@@ -18,11 +18,12 @@ import yaml
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
-from sqlalchemy import create_engine, text
 
 from .config import CONFIG_FILENAME, USER_CONFIG_PATH, get_api_host, get_api_key, get_data_source_config
 
 console = Console()
+create_engine = None
+text = None
 
 DATA_TEST_FILE_PATTERN = "*.dile.yaml"
 DEFAULT_CONFIG_TEMPLATE_PATH = Path(CONFIG_FILENAME)
@@ -326,16 +327,32 @@ def _build_query_runner(data_source_config: dict) -> Callable[[str], QueryExecut
 
 
 def _build_postgres_query_runner(data_source_config: dict) -> Callable[[str], QueryExecutionResult]:
-    engine = create_engine(
-        _build_postgres_connection_url(data_source_config),
-        connect_args={"connect_timeout": DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS},
-    ).execution_options(
-        postgresql_readonly=True,
-    )
+    sqlalchemy_create_engine, sqlalchemy_text = _load_postgres_dependencies()
+    try:
+        engine = sqlalchemy_create_engine(
+            _build_postgres_connection_url(data_source_config),
+            connect_args={"connect_timeout": DEFAULT_DATABASE_CONNECT_TIMEOUT_SECONDS},
+        ).execution_options(
+            postgresql_readonly=True,
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name == "psycopg2":
+            raise RuntimeError(
+                "PostgreSQL data sources require the PostgreSQL extra to be installed. "
+                "Install it with: pip install 'datadile[postgres]'"
+            ) from exc
+        raise
 
     try:
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+            conn.execute(sqlalchemy_text("SELECT 1"))
+    except ModuleNotFoundError as exc:
+        if exc.name == "psycopg2":
+            raise RuntimeError(
+                "PostgreSQL data sources require the PostgreSQL extra to be installed. "
+                "Install it with: pip install 'datadile[postgres]'"
+            ) from exc
+        raise
     except Exception as exc:
         raise RuntimeError(
             "Could not connect to PostgreSQL database "
@@ -353,7 +370,7 @@ def _build_postgres_query_runner(data_source_config: dict) -> Callable[[str], Qu
         with engine.connect() as conn:
             rows = []
             row_count = 0
-            for row in conn.execute(text(query)):
+            for row in conn.execute(sqlalchemy_text(query)):
                 row_count += 1
                 if len(rows) < DATA_TEST_RESULT_ROW_LIMIT:
                     rows.append(dict(row._mapping))
@@ -362,11 +379,33 @@ def _build_postgres_query_runner(data_source_config: dict) -> Callable[[str], Qu
     return run_postgres_query
 
 
+def _load_postgres_dependencies() -> tuple[Callable[..., Any], Callable[[str], Any]]:
+    global create_engine, text
+    if create_engine is not None:
+        return create_engine, text or (lambda statement: statement)
+
+    try:
+        from sqlalchemy import create_engine as sqlalchemy_create_engine
+        from sqlalchemy import text as sqlalchemy_text
+    except ImportError as exc:
+        raise RuntimeError(
+            "PostgreSQL data sources require the PostgreSQL extra to be installed. "
+            "Install it with: pip install 'datadile[postgres]'"
+        ) from exc
+
+    create_engine = sqlalchemy_create_engine
+    text = sqlalchemy_text
+    return create_engine, text
+
+
 def _build_mongodb_query_runner(data_source_config: dict) -> Callable[[str], QueryExecutionResult]:
     try:
         from pymongo import MongoClient
     except ImportError as exc:
-        raise RuntimeError("MongoDB data sources require the pymongo package to be installed.") from exc
+        raise RuntimeError(
+            "MongoDB data sources require the MongoDB extra to be installed. "
+            "Install it with: pip install 'datadile[mongodb]'"
+        ) from exc
 
     client_kwargs: dict[str, Any] = {"serverSelectionTimeoutMS": DEFAULT_MONGODB_CONNECT_TIMEOUT_SECONDS * 1000}
     if data_source_config.get("uri"):

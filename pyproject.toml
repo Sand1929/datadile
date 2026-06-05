@@ -19,9 +19,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "sqlalchemy>=2.0",
-    "psycopg2-binary",
-    "pymongo>=4.0",
     "sqlparse>=0.4",
     "sqlglot>=25.0",
     "rank-bm25>=0.2",
@@ -32,6 +29,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+postgres = [
+    "sqlalchemy>=2.0",
+    "psycopg2-binary",
+]
+mongodb = [
+    "pymongo>=4.0",
+]
 dev = [
     "pytest>=8.0",
 ]

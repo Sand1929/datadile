@@ -100,6 +100,24 @@ def test_build_query_runner_raises_friendly_connection_error(monkeypatch):
     assert exc_info.value.__cause__ is None
 
 
+def test_build_query_runner_raises_friendly_postgres_extra_error(monkeypatch):
+    """PostgreSQL runners explain how to install optional dependencies."""
+    monkeypatch.setattr(core, "create_engine", None)
+
+    def fake_import(name, *args, **kwargs):
+        if name == "sqlalchemy":
+            raise ImportError("No module named sqlalchemy")
+        return original_import(name, *args, **kwargs)
+
+    original_import = __import__
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_query_runner({"type": "postgresql"})
+
+    assert "pip install 'datadile[postgres]'" in str(exc_info.value)
+
+
 def test_build_query_runner_limits_rows_but_counts_full_result(monkeypatch):
     """PostgreSQL runners retain a bounded sample while counting every result row."""
 
@@ -244,6 +262,24 @@ def test_build_query_runner_runs_mongodb_find_queries(monkeypatch):
     assert len(result.rows) == 100
     assert result.rows[0] == {"_id": 10, "status": "active"}
     assert result.rows[-1] == {"_id": 109, "status": "active"}
+
+
+def test_build_query_runner_raises_friendly_mongodb_extra_error(monkeypatch):
+    """MongoDB runners explain how to install optional dependencies."""
+    monkeypatch.delitem(sys.modules, "pymongo", raising=False)
+
+    def fake_import(name, *args, **kwargs):
+        if name == "pymongo":
+            raise ImportError("No module named pymongo")
+        return original_import(name, *args, **kwargs)
+
+    original_import = __import__
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_query_runner({"type": "mongodb"})
+
+    assert "pip install 'datadile[mongodb]'" in str(exc_info.value)
 
 
 def test_build_query_runner_runs_mongodb_aggregation_queries(monkeypatch):

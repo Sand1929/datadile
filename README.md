@@ -11,8 +11,10 @@ Define lightweight data tests in YAML, run them locally with the CLI, and catch 
 Install Datadile:
 
 ```bash
-pip install datadile
+pip install 'datadile[postgres]'
 ```
+
+Install `datadile[postgres]` for PostgreSQL data sources or `datadile[mongodb]` for MongoDB data sources.
 
 Add your project config file. Run this from your project or repo root, or use `--global` to add a user-level config file:
 
