@@ -1,10 +1,10 @@
 # datadile
 
-Datadile runs YAML-defined data tests against query results.
+Datadile helps teams make database assumptions explicit, testable, and visible to both humans and coding agents.
 
-Use Datadile to make the data assumptions behind your application, migrations, and backfills explicit and testable. Define lightweight checks in human-readable YAML, run them from the CLI against your database, and catch unsafe data states before they break code, block releases, or corrupt downstream workflows.
+Define lightweight data tests in YAML, run them locally with the CLI, and catch unsafe database states before they break application code, migrations, backfills, or downstream workflows.
 
-Datadile is AI-first: coding agents can add data tests as they edit code and use Datadile Cloud context to understand which assumptions are passing or failing. Datadile Cloud adds dashboards, alerts, anomaly detection, and adversarial algorithms that help catch data-related bugs agents might otherwise miss.
+[Datadile Cloud](https://datadile.io/) turns those tests into a shared data-assumption layer for your team and agents. It records test runs, shows which assumptions are passing or failing, schedules automated checks, sends alerts, and surfaces anomalies so agents can use real data context when changing code.
 
 ## Quick Start
 
@@ -86,7 +86,7 @@ datadile test --results-file datadile-results.json
 
 ## Data Tests
 
-Tests are defined in YAML files named `*.dile.yaml`. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured. `identity` is optional and gives Datadile Cloud a stable identifier for the test, even if the file path changes.
+Tests are defined in YAML files named `*.dile.yaml`. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured. `identity` is optional and gives [Datadile Cloud](https://datadile.io/) a stable identifier for the test, even if the file path changes.
 
 Use the `*.dile.yaml` naming convention and colocate data tests near the application code they protect:
 
@@ -181,12 +181,6 @@ Put data source passwords in environment variables, not in `datadile.yaml`:
 export DATABASE_PASSWORD='your_password_here'
 ```
 
-Use `password_env` if you want Datadile to read a different environment variable name.
-
-Add more named entries under `data_sources` when tests need to run against multiple databases. `default_data_source` is optional, but tests that do not set `data_source` need a default.
-
-`postgresql` is currently supported for local execution. Data tests keep `query` generic so query engines such as MongoDB can be added without changing the test format.
-
 ## Usage
 
 ```bash
@@ -205,7 +199,7 @@ datadile context --data-source app_db --column orders.status
 datadile context --data-source app_db --table orders --format json
 ```
 
-The context command loads local `*.dile.yaml` files. If an API key is configured, it also fetches matching uploaded tests from Datadile Cloud to determine what tests are currently passing and failing.
+The context command loads local `*.dile.yaml` files. If an API key is configured, it also fetches matching uploaded tests from [Datadile Cloud](https://datadile.io/) to determine what tests are currently passing and failing.
 
 ## Coding Agent Skill
 
@@ -238,11 +232,11 @@ To install it somewhere else, pass a destination path:
 datadile install-skill path/to/SKILL.md
 ```
 
-For non-interactive installs, pass `--yes` to skip the confirmation prompt.
+## [Datadile Cloud](https://datadile.io/)
 
-## Datadile Cloud
+If an API key is configured, Datadile records completed test runs in [Datadile Cloud](https://datadile.io/). Datadile monitors runs to alert you about failures and anomalies within your tests. Datadile also draws on this data to provide context to your coding agent, allowing it to take into account what data assumptions are failing while writing your code.
 
-Datadile Cloud and server-backed data sources are optional premium features. Local data tests do not require an API key.
+You can schedule tests to run automatically by connecting your data sources to Datadile Cloud, either through encrypted pipelines or within your own private cloud.
 
 To enable cloud features, put the API key in an environment variable and reference that variable from `datadile.yaml`:
 
@@ -253,8 +247,6 @@ export DATADILE_API_KEY='your_api_key_here'
 ```yaml
 api_key_env: DATADILE_API_KEY
 ```
-
-If an API key is configured, Datadile records completed local test runs in Datadile Cloud. Datadile monitors runs to alert you about failures and anomalies within your tests. Datadile also draws on this data to provide context to your coding agent, allowing it to take into account what data assumptions are failing while writing your code.
 
 Data source entries can also reference an ID if the connection details are stored on your Datadile account:
 
