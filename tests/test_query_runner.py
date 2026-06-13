@@ -511,6 +511,7 @@ def test_write_results_file_preserves_full_result_details(tmp_path):
         "actual": [{"id": 1, "status": "failed"}, {"id": 2, "status": "failed"}],
         "row_count": 2,
         "error": None,
+        "tags": [],
     }
     assert payload[1]["status"] == "error"
     assert payload[1]["error"] == "relation does not exist"

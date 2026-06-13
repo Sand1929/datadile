@@ -5,7 +5,7 @@ import operator
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from importlib import resources
@@ -155,6 +155,7 @@ class DataTest:
     data_source: str | None = None
     identity: str | None = None
     filepath: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -193,15 +194,23 @@ def load_data_tests(path: str | Path) -> list[DataTest]:
     with test_path.open() as f:
         raw = yaml.safe_load(f)
 
-    if isinstance(raw, dict) and "tests" in raw:
-        raw_tests = raw["tests"]
+    defaults = {}
+    if isinstance(raw, dict):
+        if "defaults" in raw:
+            defaults = raw["defaults"]
+            if not isinstance(defaults, dict):
+                raise ValueError("Top-level 'defaults' must be a mapping.")
+        if "tests" in raw:
+            raw_tests = raw["tests"]
+        else:
+            raw_tests = raw
     else:
         raw_tests = raw
 
     if not isinstance(raw_tests, list):
         raise ValueError("Data test file must contain a list of tests or a top-level 'tests' list.")
 
-    return [_parse_data_test(item, index, test_path) for index, item in enumerate(raw_tests, start=1)]
+    return [_parse_data_test(item, index, test_path, defaults) for index, item in enumerate(raw_tests, start=1)]
 
 
 def discover_data_test_files(root: str | Path = ".") -> list[Path]:
@@ -209,28 +218,56 @@ def discover_data_test_files(root: str | Path = ".") -> list[Path]:
     return sorted(Path(root).rglob(DATA_TEST_FILE_PATTERN))
 
 
-def _parse_data_test(raw: Any, index: int, test_path: Path | None = None) -> DataTest:
+def _parse_data_test(raw: Any, index: int, test_path: Path | None = None, defaults: dict[str, Any] | None = None) -> DataTest:
     """Validate and convert a raw YAML test entry into a DataTest."""
     if not isinstance(raw, dict):
         raise ValueError(f"Test #{index} must be a mapping.")
 
-    missing = [field for field in ("name", "description", "query", "expect") if field not in raw]
+    defaults = defaults or {}
+
+    missing = [field for field in ("name", "description", "query", "expect") if field not in raw and field not in defaults]
     if missing:
         raise ValueError(f"Test #{index} is missing required field(s): {', '.join(missing)}.")
 
-    severity = str(raw.get("severity", "MEDIUM")).upper()
+    severity = str(raw.get("severity", defaults.get("severity", "MEDIUM"))).upper()
     if severity not in SEVERITIES:
         raise ValueError(f"Test #{index} has invalid severity '{severity}'. Use LOW, MEDIUM, or HIGH.")
 
+    # Resolve and parse tags
+    raw_tags = raw.get("tags")
+    defaults_tags = defaults.get("tags")
+
+    tags_list = []
+    if isinstance(defaults_tags, list):
+        for tag in defaults_tags:
+            tag_str = str(tag).strip()
+            if tag_str and tag_str not in tags_list:
+                tags_list.append(tag_str)
+    elif defaults_tags is not None:
+        tag_str = str(defaults_tags).strip()
+        if tag_str:
+            tags_list.append(tag_str)
+
+    if isinstance(raw_tags, list):
+        for tag in raw_tags:
+            tag_str = str(tag).strip()
+            if tag_str and tag_str not in tags_list:
+                tags_list.append(tag_str)
+    elif raw_tags is not None:
+        tag_str = str(raw_tags).strip()
+        if tag_str and tag_str not in tags_list:
+            tags_list.append(tag_str)
+
     return DataTest(
-        name=str(raw["name"]),
-        description=str(raw["description"]),
-        query=str(raw["query"]),
-        expect=str(raw["expect"]),
+        name=str(raw.get("name", defaults.get("name"))),
+        description=str(raw.get("description", defaults.get("description"))),
+        query=str(raw.get("query", defaults.get("query"))),
+        expect=str(raw.get("expect", defaults.get("expect"))),
         severity=severity,
-        data_source=str(raw["data_source"]) if raw.get("data_source") else None,
-        identity=str(raw["identity"]) if raw.get("identity") else None,
+        data_source=str(raw["data_source"]) if raw.get("data_source") is not None else str(defaults["data_source"]) if defaults.get("data_source") is not None else None,
+        identity=str(raw["identity"]) if raw.get("identity") is not None else str(defaults["identity"]) if defaults.get("identity") is not None else None,
         filepath=str(test_path) if test_path else None,
+        tags=tags_list,
     )
 
 
@@ -672,6 +709,7 @@ def _cloud_run_payload(result: DataTestResult, finished_at: datetime) -> dict[st
         "actual_value": _json_safe(result.actual),
         "error_message": result.error or "",
         "finished_at": finished_at.isoformat(),
+        "tags": result.test.tags,
     }
     if comparison.subject == "row_count":
         payload["actual_row_count"] = result.row_count
@@ -759,6 +797,7 @@ def write_results_file(results: list[DataTestResult], path: str | Path) -> None:
             "description": result.test.description,
             "query": result.test.query,
             "expect": result.test.expect,
+            "tags": result.test.tags,
             "actual": _json_safe(result.actual),
             "row_count": result.row_count,
             "error": result.error,
@@ -778,6 +817,18 @@ def test_command(args: argparse.Namespace) -> None:
     tests = []
     for test_path in test_paths:
         tests.extend(load_data_tests(test_path))
+
+    filter_tags = []
+    if getattr(args, "tags", None):
+        for t in args.tags:
+            for tag in t.split(","):
+                tag_str = tag.strip()
+                if tag_str:
+                    filter_tags.append(tag_str)
+
+    if filter_tags:
+        lower_filter_tags = {ft.lower() for ft in filter_tags}
+        tests = [t for t in tests if any(tag.lower() in lower_filter_tags for tag in t.tags)]
 
     results = run_data_tests(tests, get_data_source_config)
     finished_at = datetime.now(timezone.utc)
@@ -843,6 +894,14 @@ def main() -> None:
     test_parser = subparsers.add_parser("test", help="Run YAML data tests")
     test_parser.add_argument("filepath", nargs="?", help="Path to a YAML data test file")
     test_parser.add_argument("--results-file", help="Write full test results to a JSON file")
+    test_parser.add_argument(
+        "--tag",
+        "--tags",
+        dest="tags",
+        action="append",
+        default=[],
+        help="Filter tests by one or more tags. Comma-separated tags or multiple flags are supported.",
+    )
     test_parser.set_defaults(func=test_command)
 
     context_parser = subparsers.add_parser("context", help="Show test context for tables and columns")
