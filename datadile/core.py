@@ -895,7 +895,6 @@ def main() -> None:
     test_parser.add_argument("filepath", nargs="?", help="Path to a YAML data test file")
     test_parser.add_argument("--results-file", help="Write full test results to a JSON file")
     test_parser.add_argument(
-        "--tag",
         "--tags",
         dest="tags",
         action="append",

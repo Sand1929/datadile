@@ -88,7 +88,7 @@ datadile test --results-file datadile-results.json
 
 ## Data Tests
 
-Tests are defined in YAML files named `*.dile.yaml`. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured. `identity` is optional and gives [Datadile Cloud](https://datadile.io/) a stable identifier for the test, even if the file path changes.
+Tests are defined in YAML files named `*.dile.yaml`. Each test has `name`, `description`, `query`, and `expect`. `severity` is optional and defaults to `MEDIUM`; valid values are `LOW`, `MEDIUM`, and `HIGH`. `data_source` is optional and references a named source from `data_sources`; otherwise Datadile uses `default_data_source` if one is configured. `identity` is optional and gives [Datadile Cloud](https://datadile.io/) a stable identifier for the test, even if the file path changes. `tags` is optional and specifies a list of strings (or a single string) to categorize the test.
 
 Use the `*.dile.yaml` naming convention and colocate data tests near the application code they protect:
 
@@ -144,6 +144,23 @@ tests:
     expect: "row_count <= 1"
 ```
 
+### Defaults and Tags
+
+You can define a top-level `defaults` block in your YAML test files to apply shared attributes (such as `severity`, `data_source`, and `tags`) to all tests in that file. If tests define their own tags, they are merged with the default tags.
+
+```yaml
+defaults:
+  severity: HIGH
+  tags: ["migration"]
+
+tests:
+  - name: check_users_count
+    description: Count of users should be positive.
+    query: select count(*) from users
+    expect: "> 0"
+    tags: ["pre-flight"]  # Merges into ["migration", "pre-flight"]
+```
+
 ## Configuration
 
 Datadile looks for a YAML config file in two locations. Local config takes precedence:
@@ -189,6 +206,7 @@ export DATABASE_PASSWORD='your_password_here'
 datadile test
 datadile test <path/to/file.dile.yaml>
 datadile test --results-file datadile-results.json
+datadile test --tags pre-flight,migration
 ```
 
 With no path, Datadile recursively discovers only files matching `*.dile.yaml` from the current directory. Other YAML files, such as `docker-compose.yaml`, GitHub Actions workflows, Helm values, and OpenAPI specs, are ignored.

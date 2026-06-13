@@ -22,7 +22,7 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 
 - Add pre-flight Datadile checks before data migrations, backfills, one-off scripts, or other jobs that depend on existing data shape or quality. This is the default for data-changing work unless the user explicitly declines.
 - Turn implicit application-code assumptions into explicit data invariants, such as uniqueness, allowed statuses, non-null relationships, referential integrity, or valid state transitions.
-- Add post-change Datadile checks to confirm migrations, backfills, cleanup jobs, or data repairs produced the expected results.
+- Add post-change Datadile checks to confirm migrations, backfills, cleanup jobs, or data repairs produced the expected results. Use tags like `pre-flight` or `post-change` to organize and selectively execute tests with `datadile test --tags <tag>`.
 - Add or update `*.dile.yaml` files near application code.
 - Review data tests for safe SQL, clear expectations, and valid severities.
 - Create or edit `datadile.yaml` without storing secrets in the file.
@@ -34,6 +34,8 @@ Datadile runs YAML-defined data tests against query results. Use this skill when
 - Datadile discovers only files named `*.dile.yaml` when `datadile test` is run without a path.
 - Each test needs `name`, `description`, `query`, and `expect`.
 - `severity` is optional and must be `LOW`, `MEDIUM`, or `HIGH`; it defaults to `MEDIUM`.
+- `tags` is optional and specifies a list of strings (or a single string) to categorize the test.
+- A top-level `defaults` block can define shared attributes (like `tags`, `severity`, and `data_source`) to be applied to all tests in the file.
 - `data_source` is optional; without it, Datadile uses `default_data_source` from `datadile.yaml`.
 - `datadile context` filters relevance by same data source and overlapping referenced tables/columns, not by repository or file proximity.
 - Keep passwords and API keys in environment variables. Use `password_env` and `api_key_env`; do not put secret values directly in YAML.
@@ -144,13 +146,3 @@ data_sources:
 - Wider rows compare as dictionaries or lists of dictionaries.
 - Empty result sets normalize to `None`, so use `= null` when that is intentional.
 - `row_count <operator> <value>` compares the number of rows returned, such as `row_count = 0` or `row_count <= 10`.
-
-## Coding Guidance
-
-- Preserve the `*.dile.yaml` discovery rule unless the user explicitly asks to broaden it.
-- Do not add support for inline passwords or API keys.
-- Keep YAML examples quoted around expectation strings, especially values beginning with comparison operators.
-- Prefer bounded result sets for row-inspection tests; add an explicit SQL `limit` when a query could return many rows.
-- When changing CLI behavior, keep `datadile test [filepath]` working.
-- Keep `datadile test --results-file <path>` available for agents and users who need complete result details beyond the console table.
-- When changing config behavior, keep local `datadile.yaml` precedence over `~/.datadile/datadile.yaml`.
